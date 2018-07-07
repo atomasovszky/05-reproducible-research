@@ -1,0 +1,116 @@
+---
+title: "course-project-1"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+
+### Loading the data
+```{r}
+source("libraries.R")
+activity <- fread("data/activity.csv")
+activity
+```
+
+
+
+### Distribution of total steps per day
+```{r}
+total_steps <- activity[, .(total_steps = sum(steps, na.rm = TRUE)), date]
+ggplot(data = total_steps[!is.na(total_steps)], 
+       aes(x = total_steps)) + 
+  geom_histogram() +
+  labs(x = "Total number of steps per day", y = "")
+
+knitr::kable(
+  total_steps[, .(median_total_steps = prettyNum(median(total_steps, na.rm = TRUE), big.mark = " "),
+                  mean_total_steps = prettyNum(mean(total_steps, na.rm = TRUE), big.mark = " "))]
+)
+```
+
+
+
+### Average daily activity pattern
+```{r}
+average_steps <- activity[, .(ave_steps_per_5min = mean(steps, na.rm = T)), interval]
+average_steps[, max_steps := max(ave_steps_per_5min, na.rm = T)]
+max_steps_interval <- average_steps[ave_steps_per_5min == max_steps, interval]
+max_steps <- average_steps[ave_steps_per_5min == max_steps, max_steps]
+
+ggplot(data = average_steps,
+       aes(x = interval,
+           y = ave_steps_per_5min)) +
+  geom_line() +
+  geom_point(alpha = 0.5) +
+  geom_vline(xintercept = max_steps_interval, color = "red")
+```  
+
+
+The most active interval is **`r max_steps_interval`** which means that the participants of the study had one average the most steps (`r round(max_steps, 2)`) between **08:35** and **08:40 AM**.
+
+
+
+### Missing value imputation
+```{r}
+n_missing <- nrow(activity[is.na(steps)])
+p_missing <- paste0(round(100 * n_missing / nrow(activity), 2), "%")
+```
+
+There are `r n_missing` rows where the steps variable has missing values which is `r p_missing` of the whole dataset. We are going to substitute these using the following algorithm:
+1. draw a sample from observations with the same *interval* as the missing one
+2. calculate the sample mean of *steps*
+3. imputing the sample mean
+
+
+```{r Imputation}
+activity[, imputed_steps := as.numeric(copy(steps))]
+donor_table <- activity[!is.na(steps)]
+na_index <- which(is.na(activity$steps))
+set.seed(1234)
+for (i in na_index)
+{
+    na_interval <- activity[i, interval]
+    sample <- sample(x = donor_table[interval == na_interval, steps],
+                     size = 10,
+                     replace = TRUE)
+  
+    activity[i, imputed_steps := mean(sample)]
+}
+```
+
+```{r}
+total_steps <- activity[, .(total_sends_imputed = sum(imputed_steps)), date]
+ggplot(data = total_steps, 
+       aes(x = total_sends_imputed)) + 
+  geom_histogram() +
+  labs(x = "Total number of steps per day (imputed)", y = "")
+
+knitr::kable(
+  total_steps[, .(median_total_steps = prettyNum(median(total_sends_imputed, na.rm = TRUE), big.mark = " "),
+                  mean_total_steps = prettyNum(mean(total_sends_imputed, na.rm = TRUE), big.mark = " "))]
+)
+```
+
+
+
+### Weekday effect in activity patterns
+```{r}
+activity[, weekday := as.factor(ifelse(format.Date(date, "%u") < 6, "Weekday", "Weekend"))]
+average_steps <- activity[, .(ave_steps_per_5min = mean(steps, na.rm = T)), .(interval, weekday)]
+average_steps[, max_steps := max(ave_steps_per_5min, na.rm = T)]
+max_steps_interval <- average_steps[ave_steps_per_5min == max_steps, interval]
+max_steps <- average_steps[ave_steps_per_5min == max_steps, max_steps]
+
+ggplot(data = average_steps,
+       aes(x = interval,
+           y = ave_steps_per_5min)) +
+  geom_line() +
+  geom_point(alpha = 0.5) +
+  facet_grid(~weekday) +
+  labs(x = "Interval", y = "Average steps taken per 5 minute intervals")
+```  
